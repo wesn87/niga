@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D FPS 戰術瞄準：連發與爆頭強化版</title>
+    <style>
+        :root {
+            --bg-color: #0a0a0a;
+            --panel-bg: rgba(0, 0, 0, 0.9);
+            --accent: #ff4444; 
+            --health-color: #00ff88;
+        }
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: var(--bg-color); color: white; user-select: none; }
+        
+        #damage-flash {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 0, 0, 0.2);
+            pointer-events: none; z-index: 3000; display: none;
+        }
+
+        /* 擊中標記 (Hit Marker) */
+        #hit-marker {
+            position: absolute;
+            top: 50%; left: 50%; width: 40px; height: 40px;
+            transform: translate(-50%, -50%);
+            z-index: 501; pointer-events: none; display: none;
+        }
+        #hit-marker::before, #hit-marker::after {
+            content: ''; position: absolute;
+            width: 2px; height: 24px; background: #ff0000;
+            left: 50%; top: 50%;
+        }
+        #hit-marker::before { transform: translate(-50%, -50%) rotate(45deg); }
+        #hit-marker::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+        #hud {
+            position: absolute; bottom: 30px; left: 30px;
+            z-index: 1000; pointer-events: none; display: none;
+        }
+        .stat-box {
+            background: rgba(0,0,0,0.7); padding: 10px 20px;
+            border-left: 4px solid var(--accent); margin-top: 10px;
+            backdrop-filter: blur(5px);
+        }
+        .stat-label { font-size: 12px; text-transform: uppercase; color: #aaa; }
+        .stat-value { font-size: 24px; font-weight: bold; font-family: 'Courier New', monospace; }
+
+        #health-bar-container {
+            position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
+            width: 300px; height: 12px; background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.3); display: none; z-index: 1000;
+        }
+        #health-bar-fill { width: 100%; height: 100%; background: var(--health-color); transition: width 0.1s; }
+
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 24px; height: 24px;
+            transform: translate(-50%, -50%); z-index: 500; pointer-events: none; display: none;
+        }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #00ff00; }
+        #crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; margin-top: -1px; }
+        #crosshair::after { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+
+        #scope-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, transparent 15%, rgba(0,0,0,0.98) 55%);
+            z-index: 490; display: none; pointer-events: none;
+        }
+        #scope-reticle {
+            position: absolute; top: 50%; left: 50%; width: 2px; height: 100%; background: rgba(255,0,0,0.5);
+            transform: translate(-50%, -50%); z-index: 491; display: none;
+        }
+        #scope-reticle-h {
+            position: absolute; top: 50%; left: 50%; width: 100%; height: 2px; background: rgba(255,0,0,0.5);
+            transform: translate(-50%, -50%); z-index: 491; display: none;
+        }
+
+        #ui-container { position: absolute; top: 20px; left: 20px; z-index: 4000; pointer-events: none; }
+        .panel {
+            background: var(--panel-bg); padding: 20px; border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px);
+            pointer-events: auto; margin-bottom: 10px; max-width: 260px;
+        }
+        .btn {
+            display: block; background: var(--accent); color: white; padding: 12px;
+            border-radius: 4px; cursor: pointer; font-weight: bold; text-align: center; width: 100%; box-sizing: border-box;
+        }
+        #blocker {
+            position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.8);
+            display: flex; justify-content: center; align-items: center; z-index: 2500;
+        }
+        #instructions { text-align: center; cursor: pointer; padding: 40px; border: 2px solid var(--accent); border-radius: 8px; background: #111; }
+    </style>
+</head>
+<body>
+
+<div id="damage-flash"></div>
+<div id="hit-marker"></div>
+<div id="scope-overlay"></div>
+<div id="scope-reticle"></div>
+<div id="scope-reticle-h"></div>
+<div id="crosshair"></div>
+
+<div id="health-bar-container">
+    <div id="health-bar-fill"></div>
+</div>
+
+<div id="hud">
+    <div class="stat-box">
+        <div class="stat-label">彈藥數量</div>
+        <div class="stat-value"><span id="ammo-current">30</span> / 30</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-label">擊殺數</div>
+        <div class="stat-value" id="kill-count">0</div>
+    </div>
+</div>
+
+<div id="blocker">
+    <div id="instructions">
+        <h1 style="color: var(--accent);">戰術連發系統</h1>
+        <p>按住 <b>左鍵</b> 連發射擊 | <b>右鍵</b> 開鏡瞄準<br>
+           <b>R</b> 裝彈 | <b>W,A,S,D</b> 移動<br>
+           瞄準頭部可造成 <b>3倍爆頭傷害</b></p>
+        <p style="margin-top: 20px; color: #888;">點擊螢幕部署戰場</p>
+    </div>
+</div>
+
+<div id="ui-container">
+    <div class="panel">
+        <label class="btn" for="file-upload">載入地圖 (GLB)</label>
+        <input id="file-upload" type="file" accept=".glb,.gltf" />
+        <p style="font-size:11px; margin-top:10px; opacity:0.6;">請先載入地圖以優化視角</p>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+    let camera, scene, renderer, controls, loader;
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
+    let isADS = false, isShooting = false;
+    
+    let velocity = new THREE.Vector3();
+    let prevTime = performance.now();
+    let currentModel = null;
+    let shootRaycaster = new THREE.Raycaster();
+
+    // 遊戲數據
+    let health = 100, ammo = 30, kills = 0;
+    let isReloading = false;
+    let enemies = [];
+    let gunGroup;
+    let lastShootTime = 0;
+    const FIRE_RATE = 100; // 連發間隔 (ms)
+
+    init();
+    animate();
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        scene.fog = new THREE.Fog(0x050505, 0, 500);
+
+        // 調整 near 為 0.1 防止槍枝被剪裁
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+        sun.position.set(10, 50, 10);
+        scene.add(sun);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        controls = new PointerLockControls(camera, document.body);
+
+        controls.addEventListener('lock', () => {
+            document.getElementById('blocker').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('health-bar-container').style.display = 'block';
+            if (!isADS) document.getElementById('crosshair').style.display = 'block';
+        });
+
+        controls.addEventListener('unlock', () => {
+            document.getElementById('blocker').style.display = 'flex';
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('health-bar-container').style.display = 'none';
+            document.getElementById('crosshair').style.display = 'none';
+            isADS = false; updateADS();
+        });
+
+        document.getElementById('instructions').addEventListener('click', () => controls.lock());
+
+        createGun();
+
+        // 滑鼠連發處理
+        document.addEventListener('mousedown', (e) => {
+            if (!controls.isLocked) return;
+            if (e.button === 0) isShooting = true;
+            if (e.button === 2) { isADS = true; updateADS(); }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 0) isShooting = false;
+            if (e.button === 2) { isADS = false; updateADS(); }
+        });
+
+        document.addEventListener('contextmenu', e => e.preventDefault());
+
+        const onKey = (e, val) => {
+            if (e.code === 'KeyW') moveForward = val;
+            if (e.code === 'KeyA') moveLeft = val;
+            if (e.code === 'KeyS') moveBackward = val;
+            if (e.code === 'KeyD') moveRight = val;
+            if (e.code === 'Space' && val && canJump) { velocity.y += 50; canJump = false; }
+            if (e.code === 'KeyR' && val) reload();
+        };
+        document.addEventListener('keydown', (e) => onKey(e, true));
+        document.addEventListener('keyup', (e) => onKey(e, false));
+
+        loader = new GLTFLoader();
+        document.getElementById('file-upload').addEventListener('change', handleFileUpload);
+        window.addEventListener('resize', onWindowResize);
+    }
+
+    function createGun() {
+        gunGroup = new THREE.Group();
+        
+        const matGun = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.8, roughness: 0.2 });
+        const matScope = new THREE.MeshStandardMaterial({ color: 0x050505 });
+
+        // 槍身
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.4), matGun);
+        gunGroup.add(body);
+
+        // 槍管
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5), matGun);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.z = -0.4;
+        gunGroup.add(barrel);
+
+        // 瞄準鏡
+        const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25), matScope);
+        scope.rotation.x = Math.PI / 2;
+        scope.position.set(0, 0.1, -0.05);
+        gunGroup.add(scope);
+
+        // 握把
+        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.05), matGun);
+        grip.position.set(0, -0.12, 0.1);
+        grip.rotation.x = 0.3;
+        gunGroup.add(grip);
+
+        // 槍托
+        const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.1, 0.25), matGun);
+        stock.position.z = 0.3;
+        gunGroup.add(stock);
+
+        // 確保槍枝在相機前方合適位置
+        gunGroup.position.set(0.3, -0.3, -0.6); 
+        camera.add(gunGroup);
+        scene.add(camera); // 必須把相機加入場景，因為槍是相機子物件
+    }
+
+    function updateADS() {
+        const ov = document.getElementById('scope-overlay');
+        const r1 = document.getElementById('scope-reticle');
+        const r2 = document.getElementById('scope-reticle-h');
+        const ch = document.getElementById('crosshair');
+
+        if (isADS) {
+            gunGroup.position.set(0, -0.1, -0.3); // 瞄準鏡對準視線中心
+            camera.fov = 30;
+            ov.style.display = r1.style.display = r2.style.display = 'block';
+            ch.style.display = 'none';
+        } else {
+            gunGroup.position.set(0.3, -0.3, -0.6);
+            camera.fov = 75;
+            ov.style.display = r1.style.display = r2.style.display = 'none';
+            if (controls.isLocked) ch.style.display = 'block';
+        }
+        camera.updateProjectionMatrix();
+    }
+
+    function spawnEnemy() {
+        if (!currentModel) return;
+        const enemyGroup = new THREE.Group();
+        
+        // 身體
+        const bodyGeo = new THREE.BoxGeometry(1, 1.5, 0.6);
+        const bodyMat = new THREE.MeshPhongMaterial({ color: 0xcc4444 });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.userData = { isBody: true };
+        enemyGroup.add(body);
+
+        // 頭部 (爆頭判定)
+        const headGeo = new THREE.SphereGeometry(0.35, 16, 16);
+        const headMat = new THREE.MeshPhongMaterial({ color: 0xff8888 });
+        const head = new THREE.Mesh(headGeo, headMat);
+        head.position.y = 1.1;
+        head.userData = { isHead: true };
+        enemyGroup.add(head);
+
+        const box = new THREE.Box3().setFromObject(currentModel);
+        enemyGroup.position.set(
+            THREE.MathUtils.randFloat(box.min.x + 5, box.max.x - 5),
+            1.5,
+            THREE.MathUtils.randFloat(box.min.z + 5, box.max.z - 5)
+        );
+        
+        enemyGroup.userData = { health: 100, speed: 2.5 + Math.random() * 2 };
+        scene.add(enemyGroup);
+        enemies.push(enemyGroup);
+    }
+
+    function shoot() {
+        const now = performance.now();
+        if (now - lastShootTime < FIRE_RATE || ammo <= 0 || isReloading) return;
+        lastShootTime = now;
+        ammo--;
+        updateHUD();
+
+        // 後座力
+        const r = isADS ? 0.02 : 0.06;
+        gunGroup.position.z += r;
+        setTimeout(() => gunGroup.position.z -= r, 40);
+
+        shootRaycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+        
+        // 檢查所有敵人部位
+        const allTargets = [];
+        enemies.forEach(e => allTargets.push(...e.children));
+        const intersects = shootRaycaster.intersectObjects(allTargets);
+
+        if (intersects.length > 0) {
+            const hitObj = intersects[0].object;
+            const parent = hitObj.parent;
+            const isHead = hitObj.userData.isHead;
+            const damage = isHead ? 100 : 34; // 爆頭直接擊殺或重傷
+
+            parent.userData.health -= damage;
+            showHitMarker(isHead);
+
+            if (parent.userData.health <= 0) {
+                kills++;
+                updateHUD();
+                scene.remove(parent);
+                enemies = enemies.filter(e => e !== parent);
+                spawnEnemy();
+            }
+        }
+        createTracer(shootRaycaster.ray.direction);
+    }
+
+    function showHitMarker(isHead) {
+        const hm = document.getElementById('hit-marker');
+        hm.style.borderColor = isHead ? 'yellow' : 'red';
+        hm.style.display = 'block';
+        setTimeout(() => hm.style.display = 'none', 100);
+    }
+
+    function createTracer(dir) {
+        const muzzle = new THREE.Vector3();
+        gunGroup.getWorldPosition(muzzle);
+        const end = muzzle.clone().add(dir.clone().multiplyScalar(50));
+        const line = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([muzzle, end]),
+            new THREE.LineBasicMaterial({ color: 0xffffaa, transparent: true, opacity: 0.4 })
+        );
+        scene.add(line);
+        setTimeout(() => scene.remove(line), 20);
+    }
+
+    function reload() {
+        if (isReloading || ammo === 30) return;
+        isReloading = true;
+        document.getElementById('ammo-current').innerText = "...";
+        gunGroup.rotation.z = 0.5;
+        setTimeout(() => {
+            ammo = 30; isReloading = false;
+            gunGroup.rotation.z = 0;
+            updateHUD();
+        }, 1200);
+    }
+
+    function updateHUD() {
+        document.getElementById('ammo-current').innerText = ammo;
+        document.getElementById('kill-count').innerText = kills;
+        document.getElementById('health-bar-fill').style.width = health + "%";
+    }
+
+    function handleFileUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (currentModel) scene.remove(currentModel);
+        const url = URL.createObjectURL(file);
+        loader.load(url, (gltf) => {
+            currentModel = gltf.scene;
+            scene.add(currentModel);
+            enemies.forEach(en => scene.remove(en));
+            enemies = [];
+            for(let i=0; i<6; i++) spawnEnemy();
+            controls.lock();
+        });
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const time = performance.now();
+        if (controls.isLocked) {
+            const delta = (time - prevTime) / 1000;
+            if (isShooting) shoot();
+
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 9.8 * 25.0 * delta;
+
+            const dir = new THREE.Vector3(
+                Number(moveRight) - Number(moveLeft),
+                0,
+                Number(moveForward) - Number(moveBackward)
+            ).normalize();
+
+            const speed = isADS ? 300 : 600;
+            if (moveForward || moveBackward) velocity.z -= dir.z * speed * delta;
+            if (moveLeft || moveRight) velocity.x -= dir.x * speed * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            controls.getObject().position.y += (velocity.y * delta);
+
+            if (controls.getObject().position.y < 1.0) {
+                velocity.y = 0; controls.getObject().position.y = 1.0;
+                canJump = true;
+            }
+
+            // AI 跟隨
+            const pPos = controls.getObject().position;
+            enemies.forEach(en => {
+                const d = en.position.distanceTo(pPos);
+                if (d > 1.5) {
+                    const toPlayer = new THREE.Vector3().subVectors(pPos, en.position);
+                    toPlayer.y = 0;
+                    en.position.add(toPlayer.normalize().multiplyScalar(en.userData.speed * delta));
+                }
+                en.lookAt(pPos.x, en.position.y, pPos.z);
+            });
+        }
+        prevTime = time;
+        renderer.render(scene, camera);
+    }
+</script>
+</body>
+</html>
